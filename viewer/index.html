@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>img2glb viewer</title>
+<style>
+  html,body{margin:0;height:100%;background:#1e1e22;color:#ddd;font:14px system-ui,sans-serif;overflow:hidden}
+  #bar{position:fixed;top:0;left:0;right:0;display:flex;gap:10px;align-items:center;padding:8px 12px;background:#2a2a30;z-index:2}
+  select,button,label{font:inherit} select{min-width:260px;padding:4px}
+  #info{margin-left:auto;opacity:.75;font-size:12px}
+  canvas{display:block}
+  #drop{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:#0008;font-size:20px;z-index:3}
+</style>
+</head>
+<body>
+<div id="bar">
+  <select id="sel"></select>
+  <button id="reload">목록 새로고침</button>
+  <label><input type="checkbox" id="wire"> wireframe</label>
+  <label><input type="checkbox" id="spin" checked> 회전</label>
+  <label><input type="checkbox" id="bg"> 밝은 배경</label>
+  <span id="info">outputs/*/*.glb 를 고르거나, GLB 파일을 창에 드래그해도 됨</span>
+</div>
+<div id="drop">여기에 놓기</div>
+<script type="importmap">
+{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+            "three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
+import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
+
+const scene=new THREE.Scene(); scene.background=new THREE.Color(0x1e1e22);
+const cam=new THREE.PerspectiveCamera(40,innerWidth/innerHeight,0.01,100); cam.position.set(0,0.5,2.5);
+const ren=new THREE.WebGLRenderer({antialias:true}); ren.setPixelRatio(devicePixelRatio); ren.setSize(innerWidth,innerHeight);
+ren.outputColorSpace=THREE.SRGBColorSpace; document.body.appendChild(ren.domElement);
+const ctl=new OrbitControls(cam,ren.domElement); ctl.enableDamping=true;
+scene.add(new THREE.HemisphereLight(0xffffff,0x555566,1.2));
+const dl=new THREE.DirectionalLight(0xffffff,1.5); dl.position.set(2,3,2); scene.add(dl);
+const dl2=new THREE.DirectionalLight(0xffffff,0.6); dl2.position.set(-2,1,-2); scene.add(dl2);
+const grid=new THREE.GridHelper(2,20,0x444444,0x333333); grid.position.y=-0.75; scene.add(grid);
+
+let model=null; const loader=new GLTFLoader();
+const info=document.getElementById('info'), sel=document.getElementById('sel');
+
+function setModel(gltf,label){
+  if(model) scene.remove(model);
+  model=gltf.scene;
+  const box=new THREE.Box3().setFromObject(model); const size=box.getSize(new THREE.Vector3()); const c=box.getCenter(new THREE.Vector3());
+  const s=1.5/Math.max(size.x,size.y,size.z); model.scale.setScalar(s); model.position.sub(c.multiplyScalar(s));
+  let tris=0, tex=0; model.traverse(o=>{ if(o.isMesh){ tris+=o.geometry.index?o.geometry.index.count/3:o.geometry.attributes.position.count/3; if(o.material.map) tex++; o.material.side=THREE.DoubleSide; }});
+  scene.add(model); applyWire();
+  info.textContent=`${label}  |  ${Math.round(tris).toLocaleString()} tris  |  texture ${tex?'있음':'없음'}`;
+  ctl.target.set(0,0,0); cam.position.set(0,0.5,2.5);
+}
+function load(url,label){ info.textContent='loading '+label+' ...'; loader.load(url,g=>setModel(g,label),undefined,e=>{info.textContent='load 실패: '+e.message;}); }
+function applyWire(){ const w=document.getElementById('wire').checked; if(model) model.traverse(o=>{ if(o.isMesh) o.material.wireframe=w; }); }
+document.getElementById('wire').onchange=applyWire;
+document.getElementById('bg').onchange=e=>{ scene.background.set(e.target.checked?0xf0f0f0:0x1e1e22); };
+
+async function refresh(){
+  const r=await fetch('/api/list'); const items=await r.json();
+  const cur=sel.value; sel.innerHTML='';
+  if(!items.length){ sel.innerHTML='<option>outputs/ 에 GLB 없음</option>'; return; }
+  for(const it of items){ const o=document.createElement('option'); o.value=it.url; o.textContent=`${it.name}  (${it.mb} MB)`; sel.appendChild(o); }
+  const pick=items.find(i=>i.url===cur)||items.find(i=>i.name.endsWith('mesh_textured.glb'))||items[items.length-1];
+  sel.value=pick.url; load(pick.url,pick.name);
+}
+sel.onchange=()=>load(sel.value, sel.options[sel.selectedIndex].textContent);
+document.getElementById('reload').onclick=refresh;
+
+// 드래그 앤 드롭 (로컬 PC 파일)
+const drop=document.getElementById('drop');
+addEventListener('dragover',e=>{e.preventDefault();drop.style.display='flex';});
+addEventListener('dragleave',e=>{ if(!e.relatedTarget) drop.style.display='none';});
+addEventListener('drop',e=>{ e.preventDefault(); drop.style.display='none'; const f=e.dataTransfer.files[0]; if(!f) return; const u=URL.createObjectURL(f); load(u,f.name); });
+
+addEventListener('resize',()=>{cam.aspect=innerWidth/innerHeight;cam.updateProjectionMatrix();ren.setSize(innerWidth,innerHeight);});
+(function tick(){ requestAnimationFrame(tick); if(model&&document.getElementById('spin').checked) model.rotation.y+=0.004; ctl.update(); ren.render(scene,cam); })();
+refresh();
+</script>
+</body>
+</html>

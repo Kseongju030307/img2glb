@@ -1,0 +1,31 @@
+# 업스트림 클론 (setup.sh 가 받아옴, patches/apply.sh 로 패치)
+Hunyuan3D-2
+
+# 생성 결과물
+outputs
+*.glb
+*.obj
+*.ply
+
+# 학습 산출물 (전부 /data 에 있음)
+train/cache*/
+train/ckpt*/
+train/eval/
+*.npy
+*.pt
+*.safetensors
+*.log
+
+# 파이썬
+__pycache__/
+*.py[cod]
+*.egg-info/
+.ipynb_checkpoints/
+
+# 백업/임시
+*.bak
+tmp/
+.DS_Store
+
+# /data 를 가리키는 심볼릭 링크 (setup.sh 가 만듦)
+.venv
