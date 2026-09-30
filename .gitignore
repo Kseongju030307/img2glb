@@ -29,3 +29,19 @@ tmp/
 
 # /data 를 가리키는 심볼릭 링크 (setup.sh 가 만듦)
 .venv
+
+# 세션/도구 잡파일
+.agent_harnesses.json
+.check_for_*_done
+*.bak*
+outputs_tabi_orient.png
+
+# 생성 결과 (/data 심볼릭 링크)
+generated
+
+# 외부 STL (50MB, /data 에 보관)
+inputs/stl_tabi/
+
+# HF 로그인 오타로 생긴 토큰 파일 — 절대 커밋 금지
+token
+stored_tokens

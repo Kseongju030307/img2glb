@@ -10,7 +10,7 @@ from pathlib import Path
 ap = argparse.ArgumentParser()
 ap.add_argument('--input',  default='/home/sungju030307/img2glb/inputs/sample1_character')
 ap.add_argument('--ckpt',   default='/data/sungju030307/img2glb/train/ckpt/lora_last.pt')
-ap.add_argument('--out',    default='/data/sungju030307/img2glb/train/eval')
+ap.add_argument('--out',    default='/home/sungju030307/img2glb/generated')
 ap.add_argument('--gpu',    type=int, default=0)
 ap.add_argument('--steps',  type=int, default=50)
 ap.add_argument('--octree', type=int, default=380)

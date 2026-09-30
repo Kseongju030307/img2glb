@@ -27,7 +27,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))  # bgremove.py
 import faulthandler, signal
 faulthandler.register(signal.SIGUSR1, all_threads=False)  # 멈춘 것 같으면: kill -USR1 <pid> → stderr 에 스택 출력
 
-VIEWS = ["front", "back", "left", "right"]
+VIEWS = ["front", "back", "left", "right"]          # 형상(Hunyuan3D-2mv) 은 이 4뷰만 받는다 (view_num=4 고정)
+PAINT_ONLY_VIEWS = ["top", "bottom"]                  # 텍스처(Paint) 참조로만 쓰는 추가 뷰. 있으면 자동 포함
 EXTS = [".png", ".jpg", ".jpeg", ".webp"]
 
 
@@ -38,8 +39,14 @@ def parse_args():
     for v in VIEWS:
         src.add_argument(f"--{v}", type=str, help=f"{v} 뷰 이미지 경로 (input_dir 보다 우선)")
     p.add_argument("--out", type=str, required=True, help="출력 폴더")
+    p.add_argument("--mesh_normalize", action="store_true",
+                   help="--mesh 로 넣은 외부 메시(Meshy 등)를 원점 중심·크기 1.0 으로 맞춤. Hunyuan 출력이 아니면 켤 것")
+    p.add_argument("--mesh_up", choices=["y", "z"], default="y",
+                   help="--mesh 의 위쪽 축. STL/CAD 는 보통 z. (mesh_normalize 와 함께 적용)")
+    p.add_argument("--mesh_yaw", type=float, default=0.0,
+                   help="--mesh_normalize 시 Y축 회전(도). 정면이 안 맞을 때 90/180/-90 로 조정")
     p.add_argument("--mesh", type=str, default=None,
-                   help="이미 만든 GLB 경로. 주면 shape 단계를 건너뛰고 텍스처만 입힘 (예: outputs/x/mesh_white.glb)")
+                   help="이미 만든 메시 경로(GLB/STL/OBJ/PLY, trimesh 가 읽는 것 전부). 주면 shape 단계를 건너뛰고 텍스처만 입힘")
 
     g = p.add_argument_group("shape (Hunyuan3D-2mv)")
     g.add_argument("--shape_model", default="tencent/Hunyuan3D-2mv")
@@ -47,6 +54,9 @@ def parse_args():
     g.add_argument("--steps", type=int, default=50, help="diffusion step 수 (기본 50)")
     g.add_argument("--octree", type=int, default=380, help="octree 해상도. 클수록 디테일↑ 시간↑ (256~512)")
     g.add_argument("--num_chunks", type=int, default=20000)
+    g.add_argument("--flashvdm", action="store_true",
+                   help="FlashVDM 디코더 사용. 표면 근처만 촘촘히 평가해서 고해상도(octree 1024)를 "
+                        "dense 격자보다 훨씬 싸게 뽑는다. turbo VAE 로 교체됨")
     g.add_argument("--seed", type=int, default=12345)
     g.add_argument("--guidance", type=float, default=5.0)
 
@@ -55,8 +65,18 @@ def parse_args():
     t.add_argument("--paint_model", default="tencent/Hunyuan3D-2")
     t.add_argument("--paint_subfolder", default="hunyuan3d-paint-v2-0-turbo",
                    help="hunyuan3d-paint-v2-0 (느림/고품질) 또는 hunyuan3d-paint-v2-0-turbo")
-    t.add_argument("--paint_views", default="front,back,left,right",
-                   help="텍스처 생성에 넣을 뷰 (쉼표). 'front' 만 넣으면 공식 예제와 동일")
+    t.add_argument("--paint_bake_exp", type=float, default=None,
+                   help="베이킹 cos 지수. 기본 4 는 뷰 경계가 칼같이 갈라져 얼룩이 됨. 2 로 낮추면 경계가 부드럽게 섞임")
+    t.add_argument("--paint_side_weight", type=float, default=None,
+                   help="좌/우 뷰 베이킹 가중치. 파이프라인 기본 0.1 은 옆면에 앞/뒤 투영이 섞여 얼룩이 생김. 0.5 권장")
+    t.add_argument("--paint_views", default="front,back,left,right,top,bottom",
+                   help="텍스처 참조로 넣을 뷰 (쉼표). 파일이 없는 뷰는 건너뜀. top/bottom 은 텍스처에만 쓰임")
+    t.add_argument("--unlit", action="store_true",
+                   help="KHR_materials_unlit 로 내보냄. 뷰어 조명을 안 받아 텍스처 색 그대로(셀 셰이딩/평면). "
+                        "안 주면 metallic=0 만 적용 (조명은 받되 금속처럼 어둡게 눌리지 않음)")
+    t.add_argument("--paint_oblique", action="store_true",
+                   help="베이킹 카메라에 el±20 비스듬한 뷰 8장 추가. 정수리/바닥 정면(el±90) 생성이 저품질이라 "
+                        "그 경계 영역을 품질 좋은 비스듬한 뷰가 맡게 한다. 뷰 6->14 라 페인트 시간 ~2배")
     t.add_argument("--tex_faces", type=int, default=100000,
                    help="텍스처 전에 면 수를 이 값으로 축소 (UV 전개가 CPU 라 100만 면이면 수십 분 걸림). 0 이면 축소 안 함. 공식 앱은 40000")
 
@@ -86,7 +106,7 @@ def collect_inputs(args):
         d = Path(args.input_dir)
         if not d.is_dir():
             sys.exit(f"[err] input_dir 없음: {d}")
-        for v in VIEWS:
+        for v in VIEWS + PAINT_ONLY_VIEWS:
             f = find_view(d, v)
             if f:
                 paths[v] = f
@@ -114,6 +134,26 @@ def load_and_clean(paths, save_dir: Path, bg_mode="auto", bg_tol=14):
     return images
 
 
+def fix_glb_material(path, unlit=False):
+    """trimesh 가 metallicFactor 를 안 써서 뷰어가 기본값 1.0(완전 금속)으로 본다.
+    그러면 텍스처가 어둡게 눌리고 반사가 생겨 음영처럼 보인다. 캐릭터는 0 이 맞다.
+    unlit=True 면 KHR_materials_unlit 도 붙여 뷰어 조명을 아예 안 받게 한다."""
+    import json, struct
+    with open(path, "rb") as f:
+        magic, ver, _ = struct.unpack("<III", f.read(12))
+        jl, jt = struct.unpack("<II", f.read(8)); j = json.loads(f.read(jl)); rest = f.read()
+    for m in j.setdefault("materials", [{}]):
+        pbr = m.setdefault("pbrMetallicRoughness", {}); pbr["metallicFactor"] = 0.0; pbr["roughnessFactor"] = 1.0
+        if unlit:
+            m.setdefault("extensions", {})["KHR_materials_unlit"] = {}
+            j["extensionsUsed"] = sorted(set(j.get("extensionsUsed", [])) | {"KHR_materials_unlit"})
+    jb = json.dumps(j, separators=(",", ":")).encode(); jb += b" " * ((4 - len(jb) % 4) % 4)
+    body = struct.pack("<II", len(jb), jt) + jb + rest
+    with open(path, "wb") as f:
+        f.write(struct.pack("<III", magic, ver, 12 + len(body)) + body)
+    print(f"   재질 보정: metallic=0" + (", unlit" if unlit else ""))
+
+
 def main():
     args = parse_args()
     if args.gpu is not None:
@@ -139,6 +179,20 @@ def main():
         white_path = Path(args.mesh)
         mesh = trimesh.load(white_path, force="mesh")
         print(f"== shape 건너뜀, 기존 메시 사용: {white_path}  faces={len(mesh.faces)}")
+        # 외부(Meshy 등) 메시는 좌표계/크기가 제각각이다. Paint 는 고정 카메라로 메시를 렌더해
+        # 입력 뷰와 맞추므로, Hunyuan 출력과 같은 프레임(원점 중심, 최대 반경 ~1, Y-up, 정면 +Z)으로 맞춘다.
+        if args.mesh_normalize:
+            import numpy as np
+            # STL 은 삼각형마다 정점이 따로 있어 법선이 각져 보인다(Paint 가 법선맵을 렌더하므로 영향).
+            # 정점을 합쳐 매끈한 법선을 얻는다. GLB 에도 무해.
+            mesh.merge_vertices()
+            if args.mesh_up == "z":   # CAD/STL 은 Z-up 이 흔함 -> Y-up 으로
+                mesh.apply_transform(trimesh.transformations.rotation_matrix(np.radians(-90), [1, 0, 0]))
+            mesh.apply_translation(-mesh.bounds.mean(axis=0))
+            mesh.apply_scale(1.0 / np.abs(mesh.vertices).max())
+            if args.mesh_yaw:
+                mesh.apply_transform(trimesh.transformations.rotation_matrix(np.radians(args.mesh_yaw), [0, 1, 0]))
+            print(f"   정규화: 중심 이동 + 크기 1.0, yaw {args.mesh_yaw}°  bbox={np.round(mesh.extents, 3)}")
         if args.reduce_faces > 0:
             mesh = FaceReducer()(mesh, max_facenum=args.reduce_faces)
             print(f"   면 수 축소 -> {len(mesh.faces)}")
@@ -148,8 +202,13 @@ def main():
         shape_pipe = Hunyuan3DDiTFlowMatchingPipeline.from_pretrained(
             args.shape_model, subfolder=args.shape_subfolder, variant="fp16"
         )
+        if args.flashvdm:
+            # octree 1024 는 dense 격자가 (1024+1)^3 = 10억 점이라 512 의 8배다.
+            # FlashVDM 은 표면 근처만 계층적으로 평가해서 이걸 감당 가능하게 만든다.
+            shape_pipe.enable_flashvdm(enabled=True)
+            print("   FlashVDM 디코더 활성화 (turbo VAE)")
         mesh = shape_pipe(
-            image=images,
+            image={v: images[v] for v in VIEWS if v in images},   # top/bottom 제외
             num_inference_steps=args.steps,
             octree_resolution=args.octree,
             num_chunks=args.num_chunks,
@@ -186,12 +245,30 @@ def main():
             mesh = FaceReducer()(mesh, max_facenum=args.tex_faces)
             print(f"   텍스처용 면 수 축소 -> {len(mesh.faces)}  (mesh_white.glb 는 원본 유지)")
         paint_pipe = Hunyuan3DPaintPipeline.from_pretrained(args.paint_model, subfolder=args.paint_subfolder)
+        if args.paint_bake_exp is not None:
+            paint_pipe.config.bake_exp = args.paint_bake_exp
+            print(f"   페인트 bake_exp -> {args.paint_bake_exp}")
+        if args.paint_side_weight is not None:
+            # candidate_view_weights = [앞, 좌, 뒤, 우, 위, 아래] 순. 기본 [1, .1, .5, .1, .05, .05]
+            w = list(paint_pipe.config.candidate_view_weights)
+            w[1] = w[3] = args.paint_side_weight
+            paint_pipe.config.candidate_view_weights = w
+            print(f"   페인트 뷰 가중치 -> {w}")
+        if args.paint_oblique:
+            cfg = paint_pipe.config
+            az = list(cfg.candidate_camera_azims); el = list(cfg.candidate_camera_elevs); w = list(cfg.candidate_view_weights)
+            for e in (20, -20):
+                for a_ in (0, 90, 180, 270):
+                    az.append(a_); el.append(e); w.append(0.3)
+            cfg.candidate_camera_azims, cfg.candidate_camera_elevs, cfg.candidate_view_weights = az, el, w
+            print(f"   페인트 비스듬한 뷰 추가 -> 총 {len(az)}뷰")
         wanted = [v.strip() for v in args.paint_views.split(",") if v.strip()]
         paint_imgs = [images[v] for v in wanted if v in images]
         print(f"   paint 입력 뷰: {[v for v in wanted if v in images]}")
         mesh = paint_pipe(mesh, image=paint_imgs if len(paint_imgs) > 1 else paint_imgs[0])
         tex_path = out / "mesh_textured.glb"
         mesh.export(tex_path)
+        fix_glb_material(tex_path, unlit=args.unlit)
         result["textured"] = str(tex_path)
         print(f"   texture 완료 {time.time() - t0:.1f}s  저장: {tex_path}")
 
