@@ -5,23 +5,141 @@
 <title>img2glb viewer</title>
 <style>
   html,body{margin:0;height:100%;background:#1e1e22;color:#ddd;font:14px system-ui,sans-serif;overflow:hidden}
-  #bar{position:fixed;top:0;left:0;right:0;display:flex;gap:10px;align-items:center;padding:8px 12px;background:#2a2a30;z-index:2}
-  select,button,label{font:inherit} select{min-width:260px;padding:4px}
-  #info{margin-left:auto;opacity:.75;font-size:12px}
+  #bar{position:fixed;top:0;left:0;right:380px;display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:8px 12px;background:#2a2a30;z-index:2}
+  select,button,label,input{font:inherit} select{min-width:260px;max-width:420px;padding:4px}
+  button{background:#3a3a44;color:#eee;border:1px solid #555;border-radius:4px;padding:4px 10px;cursor:pointer}
+  button:hover{background:#4a4a56} button.primary{background:#2f6fd6;border-color:#2f6fd6} button.primary:hover{background:#3b7ce6}
+  button:disabled{opacity:.5;cursor:default}
+  #info{opacity:.75;font-size:12px}
+  #view{position:fixed;left:0;top:0;right:380px;bottom:0}
   canvas{display:block}
-  #drop{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:#0008;font-size:20px;z-index:3}
+  #drop{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:#0008;font-size:20px;z-index:5}
+  #side{position:fixed;top:0;right:0;width:380px;bottom:0;background:#26262c;border-left:1px solid #333;overflow-y:auto;z-index:3;box-sizing:border-box;padding:10px 12px}
+  .tabs{display:flex;gap:4px;margin-bottom:10px} .tabs button{flex:1} .tabs button.on{background:#2f6fd6;border-color:#2f6fd6}
+  .sec{display:none} .sec.on{display:block}
+  .row{margin:8px 0} .row>label.t{display:block;font-size:12px;opacity:.75;margin-bottom:3px}
+  .pick{display:flex;gap:6px} .pick input{flex:1;min-width:0;background:#1b1b20;color:#ddd;border:1px solid #444;border-radius:4px;padding:4px 6px}
+  input[type=text],input[type=number]{background:#1b1b20;color:#ddd;border:1px solid #444;border-radius:4px;padding:4px 6px}
+  .opts{display:grid;grid-template-columns:1fr 1fr;gap:6px 10px;font-size:13px}
+  .thumbs{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;margin-top:6px}
+  .thumbs div{background:#1b1b20;border:1px solid #333;border-radius:4px;text-align:center;font-size:11px;padding:2px}
+  .thumbs img{width:100%;aspect-ratio:1;object-fit:contain;background:#fff;border-radius:3px}
+  .thumbs .miss{opacity:.4}
+  .msg{font-size:12px;margin-top:6px;white-space:pre-wrap} .err{color:#ff8a80} .ok{color:#8bd88b}
+  .updrop{border:1.5px dashed #555;border-radius:8px;padding:20px 16px;color:#9a9aa5;cursor:pointer;font-size:13px;background:#1b1b20;display:flex;flex-direction:column;align-items:center;gap:8px;transition:border-color .15s,background .15s,color .15s}
+  .updrop svg{opacity:.85}
+  .updrop.hot{border-color:#2f6fd6;color:#cfe0ff;background:#202738}
+  .it svg{vertical-align:-3px;margin-right:7px;opacity:.72}
+  button svg{vertical-align:-3px}
+  .primary svg{opacity:.95;margin-right:6px}
+  #status{font-size:12px;opacity:.8;margin:6px 0 10px}
+  h3{font-size:13px;margin:16px 0 6px;opacity:.85}
+  .job{background:#1f1f25;border:1px solid #333;border-radius:6px;padding:8px;margin-bottom:8px;font-size:12px}
+  .job .top{display:flex;justify-content:space-between;gap:6px} .job .st{font-weight:600}
+  .job.running .st{color:#ffcc66} .job.done .st{color:#8bd88b} .job.fail .st{color:#ff8a80}
+  .job pre{max-height:120px;overflow:auto;background:#151519;padding:6px;border-radius:4px;margin:6px 0 0;white-space:pre-wrap;font-size:11px}
+  .job .btns{display:flex;gap:6px;margin-top:6px} .job img{width:100%;margin-top:6px;border-radius:4px;background:#fff}
+  /* 파일 선택 창 */
+  #modal{position:fixed;inset:0;background:#000a;display:none;align-items:center;justify-content:center;z-index:10}
+  #modal .box{width:min(720px,94vw);max-height:86vh;background:#26262c;border:1px solid #444;border-radius:8px;display:flex;flex-direction:column}
+  #modal .head{padding:10px 12px;border-bottom:1px solid #333;display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+  #modal .path{flex:1;min-width:200px;font-size:12px;word-break:break-all;opacity:.85}
+  #modal .list{overflow-y:auto;padding:6px 8px;flex:1}
+  #modal .it{padding:5px 8px;border-radius:4px;cursor:pointer;display:flex;justify-content:space-between;gap:8px}
+  #modal .it:hover{background:#34343c} #modal .it.dis{opacity:.4;cursor:default}
+  #modal .foot{padding:10px 12px;border-top:1px solid #333;display:flex;gap:8px;justify-content:flex-end;align-items:center}
+  #modal .foot .hint{margin-right:auto;font-size:12px;opacity:.75}
 </style>
 </head>
 <body>
+<div id="view"></div>
 <div id="bar">
   <select id="sel"></select>
   <button id="reload">목록 새로고침</button>
   <label><input type="checkbox" id="wire"> wireframe</label>
   <label><input type="checkbox" id="spin" checked> 회전</label>
   <label><input type="checkbox" id="bg"> 밝은 배경</label>
-  <span id="info">outputs/*/*.glb 를 고르거나, GLB 파일을 창에 드래그해도 됨</span>
+  <span id="info">GLB 를 고르거나 창에 드래그</span>
 </div>
 <div id="drop">여기에 놓기</div>
+
+<div id="side">
+  <div id="status">상태 확인 중…</div>
+  <div class="tabs"><button id="tabAuto" class="on">이미지→3D</button><button id="tabGen">GLB 만들기</button><button id="tabRe">텍스처 다시 굽기</button></div>
+
+  <div id="secAuto" class="sec on">
+    <div class="row"><label class="t">캐릭터 정면 이미지 1장 — 끌어다 놓거나 클릭</label>
+      <div id="upDrop" class="updrop">
+        <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2.5"/><circle cx="8.5" cy="9.5" r="1.6"/><path d="M4 16.5l4.5-4.5 4 4 2.5-2.5 5 5"/></svg>
+        <div>이미지 선택 / 드롭</div></div>
+      <input id="upFile" type="file" accept="image/*" style="display:none">
+      <div id="upPrev" class="thumbs" style="grid-template-columns:1fr"></div></div>
+    <div class="row"><label class="t">결과 이름 (비우면 파일 이름) → generated/03_glb/&lt;이름&gt;</label>
+      <input id="auName" type="text" style="width:100%;box-sizing:border-box"></div>
+    <div class="opts">
+      <label><input type="checkbox" id="auFour"> 4뷰(옆모습 포함·형상↑·느림)</label>
+      <label><input type="checkbox" id="auChibi" checked> 치비 비율</label>
+      <label><input type="checkbox" id="auQuant"> 5색 무광 양자화</label>
+      <label><input type="checkbox" id="auOverwrite"> 같은 이름 덮어쓰기</label>
+      <label><input type="checkbox" id="auTransfer"> 프린팅용 고해상 색</label>
+      <label><input type="checkbox" id="auOblique" checked> 비스듬한 뷰</label>
+      <label>턴 GPU <input id="auTurnGpu" type="text" value="2,3" style="width:54px;background:#1b1b20;color:#ddd;border:1px solid #444;border-radius:4px"></label>
+      <label>3D GPU <select id="auGpu" class="gpusel"></select></label>
+      <label>octree <select id="auOctree"><option>1024</option><option>512</option><option>384</option></select></label>
+      <label>텍스처 면 <select id="auTex"><option value="300000">30만</option><option value="100000">10만</option><option value="1000000">100만 (느림)</option></select></label>
+    </div>
+    <div class="row" id="auColorsWrap" style="display:none"><label class="t">팔레트 색 (비우면 자동 5색)</label>
+      <input id="auColors" type="text" placeholder="#000000,#c0392b,#ffffff,#f2d3c2,#3b6fb0" style="width:100%;box-sizing:border-box"></div>
+    <div class="row"><button id="auGo" class="primary" style="width:100%;display:inline-flex;align-items:center;justify-content:center"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 4.8L18.8 9l-4.9 1.2L12 15l-1.9-4.8L5.2 9l4.9-1.2z"/><path d="M19 14l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z"/></svg>이미지 → 3D 자동 생성</button><div id="auMsg" class="msg"></div></div>
+    <div style="font-size:11px;opacity:.55;margin-top:4px">이미지 → 4뷰 턴어라운드(자동 생성) → 형상 + 텍스처 GLB → 완료되면 3D 자동 표시. 한 번에 몇 분 걸림.</div>
+  </div>
+
+  <div id="secGen" class="sec">
+    <div class="row"><label class="t">이미지 폴더 (front/back/left/right, 이름에 front 등이 들어 있으면 됨)</label>
+      <div class="pick"><input id="genDir" type="text" placeholder="폴더 경로"><button data-pick="genDir" data-mode="dir">찾기</button></div>
+      <div id="genThumbs" class="thumbs"></div></div>
+    <div class="row"><label class="t">결과 이름 (비우면 폴더 이름) → generated/03_glb/&lt;이름&gt;</label>
+      <input id="genName" type="text" style="width:100%;box-sizing:border-box"></div>
+    <div class="opts">
+      <label><input type="checkbox" id="genOverwrite"> 같은 이름 덮어쓰기</label>
+      <label><input type="checkbox" id="genTransfer"> 프린팅용 고해상 색 (+170MB)</label>
+      <label><input type="checkbox" id="genOblique" checked> 비스듬한 뷰 (얼룩↓, 시간↑)</label>
+      <label>GPU <select id="genGpu" class="gpusel"></select></label>
+      <label>형상 octree <select id="genOctree"><option>1024</option><option>512</option><option>384</option></select></label>
+      <label>텍스처 면 <select id="genTex"><option value="300000">30만</option><option value="100000">10만</option><option value="1000000">100만 (느림)</option></select></label>
+    </div>
+    <div class="row"><button id="genGo" class="primary" style="width:100%">GLB 만들기 시작</button><div id="genMsg" class="msg"></div></div>
+  </div>
+
+  <div id="secRe" class="sec">
+    <div class="row"><label class="t">형상 GLB (보통 mesh_white.glb) · STL/OBJ 도 가능</label>
+      <div class="pick"><input id="reGlb" type="text" placeholder="GLB 경로"><button data-pick="reGlb" data-mode="mesh">찾기</button></div></div>
+    <div class="row"><label class="t">텍스처용 이미지 폴더</label>
+      <div class="pick"><input id="reDir" type="text" placeholder="폴더 경로"><button data-pick="reDir" data-mode="dir">찾기</button></div>
+      <div id="reThumbs" class="thumbs"></div></div>
+    <div class="row"><label class="t">결과 이름 (비우면 GLB 가 있는 폴더의 mesh_textured.glb 를 덮어씀)</label>
+      <input id="reName" type="text" style="width:100%;box-sizing:border-box"></div>
+    <div class="opts">
+      <label><input type="checkbox" id="reOblique" checked> 비스듬한 뷰</label>
+      <label><input type="checkbox" id="reTransfer"> 프린팅용 고해상 색</label>
+      <label><input type="checkbox" id="reNorm"> 외부 메시 정규화</label>
+      <label>위쪽 축 <select id="reUp"><option value="y">Y</option><option value="z">Z (STL 흔함)</option></select></label>
+      <label>GPU <select id="reGpu" class="gpusel"></select></label>
+      <label>텍스처 면 <select id="reTex"><option value="300000">30만</option><option value="100000">10만</option><option value="1000000">100만 (느림)</option></select></label>
+    </div>
+    <div class="row"><button id="reGo" class="primary" style="width:100%">텍스처 굽기 시작</button><div id="reMsg" class="msg"></div></div>
+  </div>
+
+  <h3>작업</h3>
+  <div id="jobs"></div>
+</div>
+
+<div id="modal"><div class="box">
+  <div class="head"><button id="mUp"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M6 11l6-6 6 6"/></svg>위로</button><span id="mRoots"></span><div class="path" id="mPath"></div></div>
+  <div class="list" id="mList"></div>
+  <div class="foot"><span class="hint" id="mHint"></span><button id="mCancel">취소</button><button id="mOk" class="primary">이 폴더 선택</button></div>
+</div></div>
+
 <script type="importmap">
 {"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
             "three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}
@@ -30,55 +148,183 @@
 import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
+const $=id=>document.getElementById(id);
+const fileUrl=p=>'/api/file?path='+encodeURIComponent(p);
+// 코드로 그린 벡터(SVG) 아이콘 — 이모지 대신. currentColor 상속.
+const _svg=(w,p)=>`<svg viewBox="0 0 24 24" width="${w}" height="${w}" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
+const IC={
+  folder:_svg(15,'<path d="M3 7a2 2 0 0 1 2-2h3.6l1.8 2H19a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>'),
+  cube:_svg(15,'<path d="M21 7.8l-9-4.8-9 4.8 9 4.8 9-4.8z"/><path d="M3 7.8v8.4l9 4.8 9-4.8V7.8"/><path d="M12 12.6v9"/>'),
+  image:_svg(15,'<rect x="3" y="4" width="18" height="16" rx="2.2"/><circle cx="8.5" cy="9.5" r="1.5"/><path d="M4 16.5l4.5-4.5 4 4 2.5-2.5 5 5"/>'),
+};
 
+// ───── 3D 뷰어 ─────
+const host=$('view');
 const scene=new THREE.Scene(); scene.background=new THREE.Color(0x1e1e22);
-const cam=new THREE.PerspectiveCamera(40,innerWidth/innerHeight,0.01,100); cam.position.set(0,0.5,2.5);
-const ren=new THREE.WebGLRenderer({antialias:true}); ren.setPixelRatio(devicePixelRatio); ren.setSize(innerWidth,innerHeight);
-ren.outputColorSpace=THREE.SRGBColorSpace; document.body.appendChild(ren.domElement);
+const cam=new THREE.PerspectiveCamera(40,1,0.01,100); cam.position.set(0,0.5,2.5);
+const ren=new THREE.WebGLRenderer({antialias:true}); ren.setPixelRatio(devicePixelRatio);
+ren.outputColorSpace=THREE.SRGBColorSpace; host.appendChild(ren.domElement);
 const ctl=new OrbitControls(cam,ren.domElement); ctl.enableDamping=true;
 scene.add(new THREE.HemisphereLight(0xffffff,0x555566,1.2));
 const dl=new THREE.DirectionalLight(0xffffff,1.5); dl.position.set(2,3,2); scene.add(dl);
 const dl2=new THREE.DirectionalLight(0xffffff,0.6); dl2.position.set(-2,1,-2); scene.add(dl2);
 const grid=new THREE.GridHelper(2,20,0x444444,0x333333); grid.position.y=-0.75; scene.add(grid);
+function resize(){ const w=host.clientWidth,h=host.clientHeight; cam.aspect=w/h; cam.updateProjectionMatrix(); ren.setSize(w,h); }
+addEventListener('resize',resize); resize();
 
 let model=null; const loader=new GLTFLoader();
-const info=document.getElementById('info'), sel=document.getElementById('sel');
-
+const info=$('info'), sel=$('sel');
 function setModel(gltf,label){
   if(model) scene.remove(model);
   model=gltf.scene;
   const box=new THREE.Box3().setFromObject(model); const size=box.getSize(new THREE.Vector3()); const c=box.getCenter(new THREE.Vector3());
   const s=1.5/Math.max(size.x,size.y,size.z); model.scale.setScalar(s); model.position.sub(c.multiplyScalar(s));
-  let tris=0, tex=0; model.traverse(o=>{ if(o.isMesh){ tris+=o.geometry.index?o.geometry.index.count/3:o.geometry.attributes.position.count/3; if(o.material.map) tex++; o.material.side=THREE.DoubleSide; }});
+  let tris=0, tex=0, vc=0; model.traverse(o=>{ if(o.isMesh){ tris+=o.geometry.index?o.geometry.index.count/3:o.geometry.attributes.position.count/3;
+    if(o.material.map) tex++; if(o.geometry.attributes.color){ o.material.vertexColors=true; vc++; } o.material.side=THREE.DoubleSide; o.material.needsUpdate=true; }});
   scene.add(model); applyWire();
-  info.textContent=`${label}  |  ${Math.round(tris).toLocaleString()} tris  |  texture ${tex?'있음':'없음'}`;
+  info.textContent=`${label}  |  ${Math.round(tris).toLocaleString()} tris  |  ${tex?'텍스처':vc?'정점색':'색 없음'}`;
   ctl.target.set(0,0,0); cam.position.set(0,0.5,2.5);
 }
-function load(url,label){ info.textContent='loading '+label+' ...'; loader.load(url,g=>setModel(g,label),undefined,e=>{info.textContent='load 실패: '+e.message;}); }
-function applyWire(){ const w=document.getElementById('wire').checked; if(model) model.traverse(o=>{ if(o.isMesh) o.material.wireframe=w; }); }
-document.getElementById('wire').onchange=applyWire;
-document.getElementById('bg').onchange=e=>{ scene.background.set(e.target.checked?0xf0f0f0:0x1e1e22); };
-
-async function refresh(){
-  const r=await fetch('/api/list'); const items=await r.json();
-  const cur=sel.value; sel.innerHTML='';
-  if(!items.length){ sel.innerHTML='<option>outputs/ 에 GLB 없음</option>'; return; }
+function load(url,label){ info.textContent='loading '+label+' ...'; loader.load(url,g=>setModel(g,label),undefined,e=>{info.textContent='load 실패: '+(e.message||e);}); }
+function applyWire(){ const w=$('wire').checked; if(model) model.traverse(o=>{ if(o.isMesh) o.material.wireframe=w; }); }
+$('wire').onchange=applyWire;
+$('bg').onchange=e=>{ scene.background.set(e.target.checked?0xf0f0f0:0x1e1e22); };
+async function refresh(pickUrl){
+  const items=await (await fetch('/api/list')).json();
+  const cur=pickUrl||sel.value; sel.innerHTML='';
+  if(!items.length){ sel.innerHTML='<option>GLB 없음</option>'; return; }
   for(const it of items){ const o=document.createElement('option'); o.value=it.url; o.textContent=`${it.name}  (${it.mb} MB)`; sel.appendChild(o); }
   const pick=items.find(i=>i.url===cur)||items.find(i=>i.name.endsWith('mesh_textured.glb'))||items[items.length-1];
-  sel.value=pick.url; load(pick.url,pick.name);
+  sel.value=pick.url; if(pick.url!==loadedUrl){ loadedUrl=pick.url; load(pick.url,pick.name); }
 }
-sel.onchange=()=>load(sel.value, sel.options[sel.selectedIndex].textContent);
-document.getElementById('reload').onclick=refresh;
-
-// 드래그 앤 드롭 (로컬 PC 파일)
-const drop=document.getElementById('drop');
+let loadedUrl=null;
+sel.onchange=()=>{ loadedUrl=sel.value; load(sel.value, sel.options[sel.selectedIndex].textContent); };
+$('reload').onclick=()=>refresh();
+const drop=$('drop');
 addEventListener('dragover',e=>{e.preventDefault();drop.style.display='flex';});
 addEventListener('dragleave',e=>{ if(!e.relatedTarget) drop.style.display='none';});
-addEventListener('drop',e=>{ e.preventDefault(); drop.style.display='none'; const f=e.dataTransfer.files[0]; if(!f) return; const u=URL.createObjectURL(f); load(u,f.name); });
-
-addEventListener('resize',()=>{cam.aspect=innerWidth/innerHeight;cam.updateProjectionMatrix();ren.setSize(innerWidth,innerHeight);});
-(function tick(){ requestAnimationFrame(tick); if(model&&document.getElementById('spin').checked) model.rotation.y+=0.004; ctl.update(); ren.render(scene,cam); })();
+addEventListener('drop',e=>{ e.preventDefault(); drop.style.display='none'; const f=e.dataTransfer.files[0]; if(!f) return; load(URL.createObjectURL(f),f.name); });
+(function tick(){ requestAnimationFrame(tick); if(model&&$('spin').checked) model.rotation.y+=0.004; ctl.update(); ren.render(scene,cam); })();
 refresh();
+
+// ───── 탭 ─────
+function tab(which){ for(const w of ['auto','gen','re']){ $('tab'+w[0].toUpperCase()+w.slice(1)).classList.toggle('on',which===w); $('sec'+w[0].toUpperCase()+w.slice(1)).classList.toggle('on',which===w); } }
+$('tabAuto').onclick=()=>tab('auto'); $('tabGen').onclick=()=>tab('gen'); $('tabRe').onclick=()=>tab('re');
+
+// ───── 이미지→3D 자동 ─────
+let auFile=null;
+function auSetFile(f){ auFile=f; const P=$('upPrev'); P.innerHTML=''; if(!f) return;
+  const d=document.createElement('div'); d.innerHTML=`<img src="${URL.createObjectURL(f)}"><div>${f.name}</div>`; P.appendChild(d);
+  if(!$('auName').value) $('auName').placeholder=f.name.replace(/\.[^.]+$/,''); $('upDrop').innerHTML=IC.image+'<div style="margin-top:6px">다른 이미지로 바꾸려면 클릭</div>'; }
+$('upDrop').onclick=()=>$('upFile').click();
+$('upFile').onchange=e=>{ if(e.target.files[0]) auSetFile(e.target.files[0]); };
+['dragover','dragenter'].forEach(ev=>$('upDrop').addEventListener(ev,e=>{e.preventDefault();e.stopPropagation();$('upDrop').classList.add('hot');}));
+['dragleave','dragend'].forEach(ev=>$('upDrop').addEventListener(ev,e=>{e.preventDefault();e.stopPropagation();$('upDrop').classList.remove('hot');}));
+$('upDrop').addEventListener('drop',e=>{ e.preventDefault(); e.stopPropagation(); $('upDrop').classList.remove('hot'); const f=e.dataTransfer.files[0]; if(f&&/^image\//.test(f.type)) auSetFile(f); });
+$('auQuant').onchange=()=>$('auColorsWrap').style.display=$('auQuant').checked?'block':'none';
+$('auGo').onclick=async()=>{ const M=$('auMsg');
+  if(!auFile){ M.className='msg err'; M.textContent='이미지를 먼저 선택하세요'; return; }
+  M.className='msg'; M.textContent='이미지 업로드 중…'; $('auGo').disabled=true;
+  try{
+    const up=await (await fetch('/api/upload?name='+encodeURIComponent(auFile.name),{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:auFile})).json();
+    if(up.error) throw new Error(up.error);
+    M.textContent='파이프라인 시작 중…';
+    const body={ front:up.path, name:$('auName').value.trim(), four_view:$('auFour').checked, chibi:$('auChibi').checked,
+      quantize:$('auQuant').checked, colors:$('auColors').value.trim(), overwrite:$('auOverwrite').checked,
+      transfer:$('auTransfer').checked, oblique:$('auOblique').checked, turn_gpus:$('auTurnGpu').value.trim(),
+      gpu:$('auGpu').value, octree:+$('auOctree').value, tex_faces:+$('auTex').value };
+    const r=await (await fetch('/api/auto',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
+    if(r.error){ M.className='msg err'; M.textContent=r.error; } else { M.className='msg ok'; M.textContent=`시작됨: GPU ${r.gpu} → ${r.out} · 완료되면 3D 자동 표시`; jobs(); status(); }
+  }catch(e){ M.className='msg err'; M.textContent=String(e); }
+  $('auGo').disabled=false;
+};
+
+// ───── 폴더/파일 선택 창 ─────
+let mTarget=null, mMode='dir', mCur=null;
+async function mOpen(target,mode){
+  mTarget=target; mMode=mode; $('modal').style.display='flex';
+  $('mOk').style.display = mode==='dir' ? '' : 'none';
+  $('mHint').textContent = mode==='dir' ? '이미지가 든 폴더로 들어간 뒤 "이 폴더 선택"' : 'GLB/STL/OBJ 파일을 클릭';
+  let start=$(target).value.trim();
+  if(!start && target==='reDir' && $('reGlb').value) start=$('reGlb').value.replace(/\/[^\/]*$/,'')+'/inputs';
+  await mGo(start||'');
+}
+async function mGo(path){
+  const r=await (await fetch('/api/browse?path='+encodeURIComponent(path))).json();
+  if(r.error){ $('mPath').textContent=r.error; return; }
+  mCur=r; $('mPath').textContent=r.path; $('mUp').disabled=!r.parent;
+  $('mRoots').innerHTML=''; for(const root of r.roots){ const b=document.createElement('button'); b.textContent=root.split('/').slice(-1)[0]||root; b.title=root; b.onclick=()=>mGo(root); $('mRoots').appendChild(b); }
+  const L=$('mList'); L.innerHTML='';
+  for(const d of r.dirs){ const it=document.createElement('div'); it.className='it'; it.innerHTML=`<span>${IC.folder}${d}</span>`; it.onclick=()=>mGo(r.path+'/'+d); L.appendChild(it); }
+  for(const f of r.files){ const it=document.createElement('div'); const usable = mMode==='mesh' ? f.kind==='mesh' : false;
+    it.className='it'+(usable?'':' dis'); it.innerHTML=`<span>${f.kind==='mesh'?IC.cube:IC.image}${f.name}</span><span style="opacity:.6">${f.mb} MB</span>`;
+    if(usable) it.onclick=()=>{ $(mTarget).value=f.path; mClose(); $(mTarget).dispatchEvent(new Event('change')); };
+    L.appendChild(it); }
+  if(mMode==='dir'){ const v=Object.keys(r.views); $('mHint').textContent = v.includes('front') ? `이 폴더에서 찾은 뷰: ${v.join(', ')}` : '이 폴더엔 front 이미지가 없음 — 다른 폴더로'; $('mOk').disabled=!v.includes('front'); }
+}
+function mClose(){ $('modal').style.display='none'; }
+$('mUp').onclick=()=>mCur&&mCur.parent&&mGo(mCur.parent);
+$('mCancel').onclick=mClose;
+$('mOk').onclick=()=>{ $(mTarget).value=mCur.path; mClose(); $(mTarget).dispatchEvent(new Event('change')); };
+$('modal').onclick=e=>{ if(e.target.id==='modal') mClose(); };
+document.querySelectorAll('[data-pick]').forEach(b=>b.onclick=()=>mOpen(b.dataset.pick,b.dataset.mode));
+
+// 폴더를 고르면 뷰 미리보기
+async function thumbs(dirInput,box){
+  const p=$(dirInput).value.trim(); const B=$(box); B.innerHTML=''; if(!p) return;
+  const r=await (await fetch('/api/browse?path='+encodeURIComponent(p))).json();
+  for(const v of ['front','left','back','right']){ const d=document.createElement('div');
+    if(r.views[v]){ d.innerHTML=`<img src="${fileUrl(r.views[v])}"><div>${v}</div>`; } else { d.className='miss'; d.innerHTML=`<div style="aspect-ratio:1;display:flex;align-items:center;justify-content:center">없음</div><div>${v}</div>`; }
+    B.appendChild(d); }
+  if(dirInput==='genDir' && !$('genName').value) $('genName').placeholder=r.path.split('/').pop();
+}
+$('genDir').addEventListener('change',()=>thumbs('genDir','genThumbs'));
+$('reDir').addEventListener('change',()=>thumbs('reDir','reThumbs'));
+$('reGlb').addEventListener('change',()=>{ const p=$('reGlb').value; if(!$('reDir').value){ fetch('/api/browse?path='+encodeURIComponent(p.replace(/\/[^\/]*$/,'')+'/inputs')).then(r=>r.json()).then(r=>{ if(r.views&&r.views.front){ $('reDir').value=r.path; thumbs('reDir','reThumbs'); }}); }
+  if(/\.(stl|obj|ply)$/i.test(p)) $('reNorm').checked=true; });
+
+// ───── 상태 / 작업 시작 ─────
+async function status(){
+  const s=await (await fetch('/api/status')).json();
+  $('status').innerHTML=`디스크 여유 <b style="color:${s.free_gb<1?'#ff8a80':'#8bd88b'}">${s.free_gb} GB</b> · GPU `+
+    s.gpus.map(g=>`<span title="${g.mem_mb}MB ${g.util}%" style="color:${g.mem_mb<1000&&!s.busy.includes(g.index)?'#8bd88b':'#ffcc66'}">${g.index}${g.mem_mb<1000&&!s.busy.includes(g.index)?'':'●'}</span>`).join(' ');
+  document.querySelectorAll('.gpusel').forEach(sl=>{ const cur=sl.value||'auto'; sl.innerHTML='<option value="auto">auto</option>'+s.gpus.map(g=>`<option value="${g.index}">${g.index}${g.mem_mb<1000?'':' (사용중)'}</option>`).join(''); sl.value=cur; });
+}
+async function post(url,body,msgEl,btn){
+  const M=$(msgEl); M.className='msg'; M.textContent='시작하는 중…'; $(btn).disabled=true;
+  try{ const r=await (await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
+    if(r.error){ M.className='msg err'; M.textContent=r.error; } else { M.className='msg ok'; M.textContent=`시작됨: GPU ${r.gpu} → ${r.out}`; jobs(); status(); }
+  } catch(e){ M.className='msg err'; M.textContent=String(e); }
+  $(btn).disabled=false;
+}
+$('genGo').onclick=()=>post('/api/generate',{input_dir:$('genDir').value.trim(), name:$('genName').value.trim(), overwrite:$('genOverwrite').checked,
+  transfer:$('genTransfer').checked, oblique:$('genOblique').checked, gpu:$('genGpu').value, octree:+$('genOctree').value, tex_faces:+$('genTex').value},'genMsg','genGo');
+$('reGo').onclick=()=>post('/api/retexture',{glb:$('reGlb').value.trim(), input_dir:$('reDir').value.trim(), name:$('reName').value.trim(),
+  transfer:$('reTransfer').checked, oblique:$('reOblique').checked, normalize:$('reNorm').checked, up:$('reUp').value, gpu:$('reGpu').value, tex_faces:+$('reTex').value},'reMsg','reGo');
+
+const seenDone=new Set(); let firstJobs=true;
+async function jobs(){
+  const js=await (await fetch('/api/jobs')).json(); const J=$('jobs'); const open=new Set([...J.querySelectorAll('details[open]')].map(d=>d.dataset.id));
+  J.innerHTML = js.length ? '' : '<div style="opacity:.6;font-size:12px">아직 없음</div>';
+  for(const j of js.slice(0,12)){
+    const d=document.createElement('div'); d.className='job '+j.status;
+    const t=`${Math.floor(j.elapsed/60)}분 ${j.elapsed%60}초`;
+    d.innerHTML=`<div class="top"><span>${j.title}</span><span class="st">${j.stage}</span></div>
+      <div style="opacity:.7;margin-top:2px">GPU ${j.gpu} · ${t} · ${j.out.replace(/^.*\/generated\//,'generated/')}</div>
+      <details data-id="${j.id}" ${open.has(j.id)?'open':''}><summary style="cursor:pointer;opacity:.75;margin-top:4px">로그</summary><pre>${(j.log_tail||'').replace(/</g,'&lt;')}</pre></details>`;
+    const btns=document.createElement('div'); btns.className='btns';
+    if(j.status==='done'){ const b=document.createElement('button'); b.textContent='3D 보기'; b.onclick=()=>{ loadedUrl=j.result_url; load(j.result_url,j.out.split('/').pop()+'/mesh_textured.glb'); refresh(j.result_url); }; btns.appendChild(b);
+      const im=document.createElement('img'); im.src=j.views_url+'&t='+j.started; d.appendChild(btns); d.appendChild(im);
+      if(!firstJobs && !seenDone.has(j.id)){ refresh(j.result_url);
+        if(j.auto){ loadedUrl=j.result_url; load(j.result_url, j.out.split('/').pop()+'/mesh_textured.glb'); $('info').textContent='자동 생성 완료 — '+j.out.split('/').pop(); } }
+      seenDone.add(j.id); }
+    else if(j.status==='running'){ const b=document.createElement('button'); b.textContent='취소'; b.onclick=async()=>{ await fetch('/api/cancel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:j.id})}); jobs(); status(); }; btns.appendChild(b); d.appendChild(btns); }
+    else { if(j.status==='done') seenDone.add(j.id); }
+    J.appendChild(d);
+  }
+  firstJobs=false;
+}
+status(); jobs(); setInterval(jobs,5000); setInterval(status,15000);
 </script>
 </body>
 </html>
